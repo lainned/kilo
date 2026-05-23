@@ -63,6 +63,7 @@ struct editorConfig{
     int screen_rows;
     int screen_cols;
     int numrows;
+    int rowoff;
     erow* row;
     struct termios orig_termios;
 };
@@ -241,7 +242,8 @@ void editorOpen(const char* filename){
 // draw tildes like vim does
 void editorDrawRows(struct abuf* ab){
     for(int i = 0; i < E.screen_rows; i++){
-        if(i >= E.numrows){
+        int filerow = i + E.rowoff;
+        if(filerow >= E.numrows){
             if(E.numrows == 0 && i == E.screen_rows / 3){
                 char welcome[80];
                 int welcomeLen = snprintf(welcome, sizeof(welcome), "Kilo version --- %s", VERSION);
@@ -261,9 +263,9 @@ void editorDrawRows(struct abuf* ab){
             }
         }
         else{
-            int len = E.row[i].size;
+            int len = E.row[filerow].size;
             if(len >= E.screen_cols) len = E.screen_cols;
-            abAppend(ab, E.row[i].chars, len);
+            abAppend(ab, E.row[filerow].chars, len);
         }
         // clear each line before the cursor
         abAppend(ab, "\x1b[K", 3);
@@ -360,6 +362,7 @@ void initEditor(void){
     E.cx = 0;
     E.cy = 0;
     E.numrows = 0;
+    E.rowoff = 0;
     E.row = NULL;
     if(getWindowSize(&E.screen_rows, &E.screen_cols) == -1) die("getWindowsSize");
 }
