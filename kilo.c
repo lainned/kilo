@@ -55,16 +55,18 @@ enum editorKey{
 
 typedef struct erow{
     int size;
+    i32 rsize;
+    char* render;
     char* chars;
 } erow;
 
 struct editorConfig{
-    int cx, cy;
-    int screen_rows;
-    int screen_cols;
-    int numrows;
-    int rowoff;
-    int coloff;
+    i32 cx, cy;
+    i32 screen_rows;
+    i32 screen_cols;
+    i32 numrows;
+    i32 rowoff;
+    i32 coloff;
     erow* row;
     struct termios orig_termios;
 };
@@ -76,12 +78,12 @@ struct editorConfig E;
 
 struct abuf{
     char* b;
-    int len;
+    i32 len;
 };
 
 #define ABUF_INIT {NULL, 0}
 
-void abAppend(struct abuf* ab, const char* s, int len){
+void abAppend(struct abuf* ab, const char* s, i32 len){
     char* new = realloc(ab->b, ab->len + len);
     if(new == NULL) return;
     memcpy(&new[ab->len], s, len);
@@ -131,7 +133,7 @@ void enableRawMode(void){
 
 i32 editorReadKey(void){
     char c = '\0';
-    int nread;
+    i32 nread;
     while((nread = read(STDIN_FILENO, &c, 1)) != 1){
         if(nread == -1 && errno != EAGAIN) die("read");
     }
@@ -176,9 +178,9 @@ i32 editorReadKey(void){
     return c;
 }
 
-int getCursorPosition(int* rows, int* cols){
+i32 getCursorPosition(i32* rows, i32* cols){
     char buf[32];
-    uint32_t i = 0;
+    u32 i = 0;
     // reading the cursor position into string buf
     if(write(STDOUT_FILENO, "\x1b[6n",4) != 4) return -1;
 
@@ -194,7 +196,7 @@ int getCursorPosition(int* rows, int* cols){
     return 0;
 }
 
-int getWindowSize(int* rows, int* cols){
+i32 getWindowSize(i32* rows, i32* cols){
     struct winsize size;
     if(ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == -1 || size.ws_col == 0 || size.ws_row == 0){
         // using a fallback method when ioctl fails
@@ -210,14 +212,43 @@ int getWindowSize(int* rows, int* cols){
 }
 /*** row operations***/
 
+void editorUpdateRow(erow* row){
+    i32 tabs = 0, j;
+    for(j = 0; j < row->size; j++){
+        if(row->chars[j] == '\t'){
+            tabs++;
+        }
+    }
+    free(row->render);
+    row->render = malloc(row->size + 1 + tabs*7);
+
+
+    i32 idx = 0;
+    for(j = 0; j < row->size; j++){
+        if(row->chars[j] == '\t'){
+            while(idx % 8 != 0){
+                row->render[idx++] = ' ';
+            }
+        }
+        else{
+            row->render[idx++] = row->chars[j];
+        }
+    }
+    row->render[idx] = '\0';
+    row->rsize = idx;
+}
+
 void editorAppendRow(char* s, size_t len){
     E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
 
-    int atrow = E.numrows;
+    i32 atrow = E.numrows;
     E.row[atrow].size = len;
     E.row[atrow].chars = malloc(len+1);
     memcpy(E.row[atrow].chars, s, len);
     E.row[atrow].chars[len] = '\0';
+    E.row[atrow].render = NULL;
+    E.row[atrow].rsize = 0;
+    editorUpdateRow(&E.row[atrow]);
     E.numrows++;
 }
 
@@ -250,21 +281,21 @@ void editorScroll(void){
     if(E.cx < E.coloff){
         E.coloff = E.cx;
     }
-    if(E.cx >= E.rowoff + E.screen_cols){
+    if(E.cx >= E.coloff + E.screen_cols){
         E.coloff = E.cx - E.screen_cols + 1;
     }
 }
 
 // draw tildes like vim does
 void editorDrawRows(struct abuf* ab){
-    for(int i = 0; i < E.screen_rows; i++){
-        int filerow = i + E.rowoff;
+    for(i32 i = 0; i < E.screen_rows; i++){
+        i32 filerow = i + E.rowoff;
         if(filerow >= E.numrows){
             if(E.numrows == 0 && i == E.screen_rows / 3){
                 char welcome[80];
-                int welcomeLen = snprintf(welcome, sizeof(welcome), "Kilo version --- %s", VERSION);
+                i32 welcomeLen = snprintf(welcome, sizeof(welcome), "Kilo version --- %s", VERSION);
                 if(welcomeLen > E.screen_cols) welcomeLen = E.screen_cols;
-                int padding = (E.screen_cols - welcomeLen) / 2;
+                i32 padding = (E.screen_cols - welcomeLen) / 2;
                 if(padding){
                     abAppend(ab, "~", 1);
                     padding--;
@@ -279,10 +310,10 @@ void editorDrawRows(struct abuf* ab){
             }
         }
         else{
-            int len = E.row[filerow].size - E.coloff;
+            i32 len = E.row[filerow].rsize - E.coloff;
             if(len < 0) len = 0;
             if(len > E.screen_cols) len = E.screen_cols;
-            abAppend(ab, &E.row[filerow].chars[E.coloff], len);
+            abAppend(ab, &E.row[filerow].render[E.coloff], len);
         }
         // clear each line before the cursor
         abAppend(ab, "\x1b[K", 3);
@@ -313,7 +344,7 @@ void editorRefreshScreen(void){
 
     char buf[32];
     // position the cursor to its old position
-    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy-E.rowoff+1, E.cx+1);
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy-E.rowoff+1, E.cx-E.coloff+1);
     abAppend(&ab, buf, strlen(buf));
     // turn on the cursor
     abAppend(&ab, "\x1b[?25h", 6);
@@ -325,19 +356,35 @@ void editorRefreshScreen(void){
 /*** INPUT***/
 
 void editorMoveCursor(i32 key){
+    erow* row = (E.cy >= E.numrows ? NULL : &E.row[E.cy]);
     switch(key){
         case ARROW_UP:
             if(E.cy > 0) E.cy--;
             break;
         case ARROW_LEFT:
             if(E.cx > 0) E.cx--;
+            else if(E.cy > 0){
+                E.cy--;
+                E.cx = E.row[E.cy].size;
+            }
             break;
         case ARROW_DOWN:
             if(E.cy < E.numrows) E.cy++;
             break;
         case ARROW_RIGHT:
-            E.cx++;
+            if(row && E.cx < row->size){
+                E.cx++;
+            }
+            else if(row && E.cx == row->size){
+                E.cy++;
+                E.cx = 0;
+            }
             break;
+    }
+    row = (E.cy >= E.numrows ? NULL : &E.row[E.cy]);
+    i32 rowlen = row ? row->size : 0;
+    if(E.cx > rowlen){
+        E.cx = rowlen;
     }
 }
 
@@ -354,7 +401,7 @@ void editorProcessPress(void){
         case PAGE_UP:
         case PAGE_DOWN:
             {
-                int times = E.screen_rows;
+                i32 times = E.screen_rows;
                 while(times--){
                     editorMoveCursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
                 }
@@ -387,7 +434,7 @@ void initEditor(void){
 }
 
 
-int main(int argc, char** argv){
+i32 main(i32 argc, char** argv){
     enableRawMode();
     initEditor();
     if(argc >= 2){
