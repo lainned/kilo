@@ -64,6 +64,7 @@ struct editorConfig{
     int screen_cols;
     int numrows;
     int rowoff;
+    int coloff;
     erow* row;
     struct termios orig_termios;
 };
@@ -239,6 +240,21 @@ void editorOpen(const char* filename){
 
 /*** OUTPUT ***/
 
+void editorScroll(void){
+    if(E.cy < E.rowoff){
+        E.rowoff = E.cy;
+    }
+    if(E.cy >= E.rowoff + E.screen_rows){
+        E.rowoff = E.cy - E.screen_rows + 1;
+    }
+    if(E.cx < E.coloff){
+        E.coloff = E.cx;
+    }
+    if(E.cx >= E.rowoff + E.screen_cols){
+        E.coloff = E.cx - E.screen_cols + 1;
+    }
+}
+
 // draw tildes like vim does
 void editorDrawRows(struct abuf* ab){
     for(int i = 0; i < E.screen_rows; i++){
@@ -263,9 +279,10 @@ void editorDrawRows(struct abuf* ab){
             }
         }
         else{
-            int len = E.row[filerow].size;
-            if(len >= E.screen_cols) len = E.screen_cols;
-            abAppend(ab, E.row[filerow].chars, len);
+            int len = E.row[filerow].size - E.coloff;
+            if(len < 0) len = 0;
+            if(len > E.screen_cols) len = E.screen_cols;
+            abAppend(ab, &E.row[filerow].chars[E.coloff], len);
         }
         // clear each line before the cursor
         abAppend(ab, "\x1b[K", 3);
@@ -285,6 +302,7 @@ void editorClearScreen(void){
 }
 
 void editorRefreshScreen(void){
+    editorScroll();
     struct abuf ab = ABUF_INIT;
     //turn off the cursor
     abAppend(&ab, "\x1b[?25l", 6);
@@ -295,7 +313,7 @@ void editorRefreshScreen(void){
 
     char buf[32];
     // position the cursor to its old position
-    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy+1, E.cx+1);
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy-E.rowoff+1, E.cx+1);
     abAppend(&ab, buf, strlen(buf));
     // turn on the cursor
     abAppend(&ab, "\x1b[?25h", 6);
@@ -315,10 +333,10 @@ void editorMoveCursor(i32 key){
             if(E.cx > 0) E.cx--;
             break;
         case ARROW_DOWN:
-            if(E.cy < E.screen_rows) E.cy++;
+            if(E.cy < E.numrows) E.cy++;
             break;
         case ARROW_RIGHT:
-            if(E.cx < E.screen_cols) E.cx++;
+            E.cx++;
             break;
     }
 }
@@ -364,6 +382,7 @@ void initEditor(void){
     E.numrows = 0;
     E.rowoff = 0;
     E.row = NULL;
+    E.coloff = 0;
     if(getWindowSize(&E.screen_rows, &E.screen_cols) == -1) die("getWindowsSize");
 }
 
