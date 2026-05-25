@@ -14,6 +14,7 @@
 #include <termios.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <ctype.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <errno.h>
@@ -109,8 +110,9 @@ void abFree(struct abuf* ab){
 /*** PROTOTYPES ***/
 
 void editorRefreshScreen(void);
-
 void editorSetStatusMessage(const char* fmt, ...);
+void editorRefreshScreen(void);
+char* editorPrompt(char* prompt);
 
 /*** TERMINAL ***/
 
@@ -310,6 +312,44 @@ void editorRowDelChar(erow* row, i32 at){
 
 /*** file i/o***/
 
+char* editorPrompt(char* prompt){
+    size_t bufsize = 128;
+    char* buf = malloc(bufsize);
+
+    size_t buflen = 0;
+    buf[0] = '\0';
+    while(1){
+        editorSetStatusMessage(prompt, buf);
+        editorRefreshScreen();
+        i32 c = editorReadKey();
+        if(c == '\r'){
+            if(buflen != 0){
+                editorSetStatusMessage("");
+                return buf;
+            }
+        } 
+        else if(c == '\x1b'){
+            free(buf);
+            editorSetStatusMessage("");
+            return NULL;
+        }
+        else if(c == BACKSPACE){
+            if(buflen > 0){
+                buf[buflen-1] = '\0';
+                buflen--;
+            }
+        }
+        else if(c < 128 && !iscntrl(c)){
+            if(buflen == bufsize - 1){
+                bufsize*=2;
+                buf = realloc(buf, bufsize);
+            }
+            buf[buflen++] = c;
+            buf[buflen] = '\0';
+        }
+    }
+}
+
 char* editorRowsToString(i32* buflen){
     i32 totlen = 0;
     i32 j;
@@ -348,7 +388,13 @@ void editorOpen(const char* filename){
 
 
 void editorSave(void){
-    if(E.filename == NULL) return;
+    if(E.filename == NULL){
+        E.filename = editorPrompt("Enter the filename as %s:");
+        if(E.filename == NULL){
+            editorSetStatusMessage("Save aborted.");
+            return;
+        }
+    }
 
     i32 len;
     char* buf = editorRowsToString(&len);
@@ -418,6 +464,21 @@ void editorInsertChar(i32 c){
     E.cx++;
 }
 
+void editorInsertNewline(void){
+    if(E.cx == 0){
+        editorInsertRow(E.cy, "", 0);
+    }
+    else{
+        erow* row = &E.row[E.cy];
+        editorInsertRow(E.cy + 1, &row->chars[E.cx], row->size - E.cx);
+        row = &E.row[E.cy];
+        row->size = E.cx;
+        row->chars[row->size] = '\0';
+        editorUpdateRow(row);
+    }
+    E.cy++;
+    E.cx = 0;
+}
 
 void editorDelChar(void){
     if(E.cy == E.numrows) return;
@@ -579,6 +640,7 @@ void editorProcessPress(void){
     switch (c) {
         // enter key
         case '\r':
+            editorInsertNewline();
             break;
         case CTRL_KEY('q'):
             if(E.dirty && quit_times){
