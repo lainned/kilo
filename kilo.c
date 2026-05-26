@@ -63,6 +63,8 @@ enum editorHighlight{
     HL_NUMBER,
     HL_STRING,
     HL_COMMENT,
+    HL_KEYWORD1,
+    HL_KEYWORD2,
     HL_MATCH
 };
 
@@ -71,6 +73,8 @@ enum editorHighlight{
 struct editorSyntax{
     char* filetype;
     char** filematch;
+    char** keywords;
+    char* singleline_comment_start;
     i32 flags;
 };
 
@@ -104,11 +108,15 @@ struct editorConfig E;
 /*** filetypes ***/
 
 char* C_HL_extensions[] = {".c", ".cpp", ".h", ".hpp", NULL};
+char* C_HL_keywords[] = {"break", "else", "if", "continue", "union", "typedef", "void", "switch", "case", "default", "while", "return", "class", "static", "for", "do", "define",
+"int|", "double|", "float|", "char|", "long|", "unsigned|", "signed|", "struct|", "class|", "enum|", "bool|"};
 
 struct editorSyntax HLDB[] = {
     {
         "c",
         C_HL_extensions,
+        C_HL_keywords,
+        "//",
         HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS
     }
 };
@@ -298,6 +306,9 @@ void editorRowUpdateSyntax(erow* row){
 
     if(E.syntax == NULL) return;
 
+    char* scs = E.syntax->singleline_comment_start;
+    char** keywords = E.syntax->keywords;
+    int scs_len = scs ? strlen(scs) : 0;
     i32 prev_sep = 1;
     i32 i = 0;
     i32 in_string = 0;
@@ -305,6 +316,12 @@ void editorRowUpdateSyntax(erow* row){
     while(i < row->size){
         char c = row->render[i];
         unsigned char prev_hl = (i > 0 ? row->hl[i-1] : HL_NORMAL);
+        if(scs_len && !in_string){
+            if(!strncmp(&row->render[i], scs, scs_len)){
+                memset(&row->hl[i], HL_COMMENT, row->rsize - i);
+                break;
+            }
+        }
         if(E.syntax-> flags & HL_HIGHLIGHT_STRINGS){
             if(in_string){
                 row->hl[i] = HL_STRING;
@@ -350,6 +367,10 @@ i32 editorSyntaxToColor(i32 hl){
             return 34;
         case HL_STRING:
             return 35;
+        case HL_KEYWORD1:
+            return 33;
+        case HL_KEYWORD2:
+            return 36;
         default:
             return 37;
     }
@@ -596,10 +617,11 @@ void editorFindCallback(char* query, i32 key){
     static int direction = 1;
 
     static i32 saved_hl_line = 0;
-    static unsigned char* saved_hl = NULL;
+    static char* saved_hl = NULL;
     if(saved_hl){
-        memcpy(&E.row[saved_hl_line], saved_hl, E.row[saved_hl_line].rsize);
+        memcpy(&E.row[saved_hl_line].hl, saved_hl, E.row[saved_hl_line].rsize);
         free(saved_hl);
+        saved_hl = NULL;
     }
     if(key == '\r' || key == '\x1b'){
         last_match = -1;
@@ -635,7 +657,7 @@ void editorFindCallback(char* query, i32 key){
             E.cx = editorRxToCx(row, match - row->render);
             E.rowoff = E.numrows;
             saved_hl_line = current;
-            saved_hl = malloc(E.row[saved_hl_line].rsize);
+            saved_hl = malloc(row->rsize);
             memcpy(saved_hl, row->hl, row->rsize);
             memset(&row->hl[match-row->render], HL_MATCH, strlen(query));
             break;
@@ -660,7 +682,6 @@ void editorFind(void){
         E.cy = saved_cy;
         E.rowoff = saved_rowoff;
         E.coloff = saved_coloff;
-
     }
 }
 
