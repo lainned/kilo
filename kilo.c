@@ -1,7 +1,8 @@
-/*** INCLUDES ***/
+/**** INCLUDES ***/
 #define _DEFAULT_SOURCE
 #define _BSD_SOURCE
 #define _GNU_SOURCE
+#include <signal.h>
 #include <stdarg.h>
 #include <time.h>
 #include <asm-generic/errno-base.h>
@@ -109,6 +110,8 @@ struct editorConfig{
 
 struct editorConfig E;
 
+volatile sig_atomic_t window_resized = 0;
+
 /*** filetypes ***/
 
 char* C_HL_extensions[] = {".c", ".cpp", ".h", ".hpp", NULL};
@@ -142,6 +145,14 @@ void kiloLog(const char* fmt, ...){
     fflush(logfile);
     fclose(logfile);
 }
+
+/*** SIGNAL HANDLING ***/
+
+void signalHandler(int sig){
+    (void)sig;
+    window_resized = 1;
+}
+
 /*** append buffer ***/
 
 struct abuf{
@@ -168,7 +179,7 @@ void abFree(struct abuf* ab){
 
 void editorRefreshScreen(void);
 void editorSetStatusMessage(const char* fmt, ...);
-void editorRefreshScreen(void);
+void editorRefreshSize(void);
 char* editorPrompt(char* prompt, void(*callback)(char*, i32));
 i32 editorRxToCx(erow* row, i32 rx);
 
@@ -220,7 +231,15 @@ i32 editorReadKey(void){
     char c = '\0';
     i32 nread;
     while((nread = read(STDIN_FILENO, &c, 1)) != 1){
-        if(nread == -1 && errno != EAGAIN) die("read");
+        if(nread == -1 && errno != EAGAIN){
+            if(errno == EINTR && window_resized){
+                editorRefreshSize();
+                editorRefreshScreen();
+                window_resized = 0;
+                continue;
+            }
+            die("read");
+        }
     }
     if(c == '\x1b'){
         char seq[3];
@@ -945,7 +964,9 @@ void editorClearScreen(void){
     // repositions the cursor to the start
     write(STDOUT_FILENO, "\x1b[H", 3);
 }
-
+void editorRefreshSize(void){
+    if(getWindowSize(&E.screen_rows, &E.screen_cols) == -1) die("getWindowsSize");
+}
 void editorRefreshScreen(void){
     editorScroll();
     struct abuf ab = ABUF_INIT;
@@ -1079,7 +1100,11 @@ void editorProcessPress(void){
     quit_times = KILO_QUIT_TIMES;
 }
 
+
+
 /*** INIT ***/
+
+
 void initEditor(void){
     E.cx = 0;
     E.cy = 0;
@@ -1093,7 +1118,19 @@ void initEditor(void){
     E.filename = NULL;
     E.dirty = 0;
     E.syntax = NULL;
-    if(getWindowSize(&E.screen_rows, &E.screen_cols) == -1) die("getWindowsSize");
+
+    // configuration of signals for the os
+    struct sigaction sa;
+    
+    // setting how the os should handle the signal that we receive
+    sa.sa_handler = signalHandler;
+    //telling the os not to block any signals by setting the whole mask to 0
+    sigemptyset(&sa.sa_mask);
+    //turning off the SA_RESTART
+    sa.sa_flags = 0;
+    sigaction(SIGWINCH, &sa,NULL);
+
+    editorRefreshSize();
     E.screen_rows-=2;
 }
 
@@ -1107,6 +1144,7 @@ i32 main(i32 argc, char** argv){
     }
     editorSetStatusMessage("Ctrl-S to save | Ctrl-Q to quit | Ctrl-F to search");
     while(1){
+        editorRefreshSize();
         editorRefreshScreen();
         editorProcessPress();
     }
