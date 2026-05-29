@@ -576,6 +576,7 @@ void editorRowDelChar(erow* row, i32 at){
 char* editorPrompt(char* prompt, void(*callback)(char*, i32)){
     size_t bufsize = 128;
     char* buf = malloc(bufsize);
+    if(buf == NULL) die("editorPrompt");
 
     size_t buflen = 0;
     buf[0] = '\0';
@@ -688,6 +689,45 @@ void editorSave(void){
         E.dirty = 0;
     }
 
+}
+/*** GO TO LINE ***/
+
+void editorGoToLineCallback(char* query, i32 key){
+    if(key == '\r' || key == '\x1b' || query[0] == '\0'){
+        return;
+    }
+    i32 line_num = 0;
+    for(u32 i = 0; query[i] != '\0'; i++){
+        char d = query[i];
+        if(d >= '0' && d <= '9'){
+            line_num = line_num * 10 + (d-'0');
+        }
+        else{
+            return;
+        }
+    }
+    if(line_num > E.numrows || line_num < 1) return;
+    E.cy = line_num - 1;
+    E.cx = 0;
+}
+
+void editorGoToLine(void){
+    i32 saved_cy = E.cy;
+    i32 saved_cx = E.cx;
+    i32 saved_rowoff = E.rowoff;
+    i32 saved_coloff = E.coloff;
+
+    char* line_num = editorPrompt("Enter the line number you want to go to: %s", editorGoToLineCallback);
+    if(line_num){
+        E.cx  = 0;
+        free(line_num);
+    }
+    else{
+        E.cy = saved_cy;
+        E.cx = saved_cx;
+        E.rowoff = saved_rowoff;
+        E.coloff = saved_coloff;
+    }
 }
 
 /*** FIND ***/
@@ -966,6 +1006,7 @@ void editorClearScreen(void){
 }
 void editorRefreshSize(void){
     if(getWindowSize(&E.screen_rows, &E.screen_cols) == -1) die("getWindowsSize");
+    E.screen_rows-=2;
 }
 void editorRefreshScreen(void){
     editorScroll();
@@ -1075,6 +1116,9 @@ void editorProcessPress(void){
         case ARROW_RIGHT:
             editorMoveCursor(c);
             break;
+        case CTRL_KEY('g'):
+            editorGoToLine();
+            break;
         case CTRL_KEY('f'):
             editorFind();
             break;
@@ -1131,7 +1175,6 @@ void initEditor(void){
     sigaction(SIGWINCH, &sa,NULL);
 
     editorRefreshSize();
-    E.screen_rows-=2;
 }
 
 
@@ -1142,9 +1185,8 @@ i32 main(i32 argc, char** argv){
         const char* filename = argv[1];
         editorOpen(filename);
     }
-    editorSetStatusMessage("Ctrl-S to save | Ctrl-Q to quit | Ctrl-F to search");
+    editorSetStatusMessage("Ctrl-S to save | Ctrl-Q to quit | Ctrl-F to search | Ctrl-G to go to line");
     while(1){
-        editorRefreshSize();
         editorRefreshScreen();
         editorProcessPress();
     }
