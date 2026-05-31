@@ -1,10 +1,9 @@
 #pragma once
 #include <signal.h>
-#include <stdatomic.h>
 #include <stdint.h>
-#include <stdbool.h>
 #include <termios.h>
 #include <time.h>
+#include <stdbool.h>
 
 typedef int8_t i8;
 typedef int16_t i16;
@@ -53,6 +52,18 @@ enum editorHighlight{
     HL_MATCH
 };
 
+/*** DATA ***/
+
+struct editorSyntax{
+    char* filetype;
+    char** filematch;
+    char** keywords;
+    char* singleline_comment_start;
+    char* multiline_comment_start;
+    char* multiline_comment_end;
+    i32 flags;
+};
+
 typedef struct erow{
     int size;
     i32 rsize;
@@ -62,7 +73,6 @@ typedef struct erow{
     unsigned char* hl;
     char* chars;
 } erow;
-
 
 struct editorConfig{
     i32 cx, cy;
@@ -80,5 +90,9 @@ struct editorConfig{
     struct termios orig_termios;
     struct editorSyntax* syntax;
 };
+
 extern struct editorConfig E;
-extern volatile sig_atomic_t window_resized;
+
+extern volatile sig_atomic_t window_resized = 0;
+
+

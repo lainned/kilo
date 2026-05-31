@@ -1,0 +1,1 @@
+void editorFree(void);

@@ -1,5 +1,5 @@
 #include "../include/terminal.h"
-#include <asm-generic/ioctls.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/ioctl.h>
